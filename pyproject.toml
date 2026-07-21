@@ -1,0 +1,17 @@
+[project]
+name = "ibs-cbs-copilot"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Nelson Dell",email = "juniordell123@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "llama-index (>=0.14.23,<0.15.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
