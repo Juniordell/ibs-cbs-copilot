@@ -1,1 +1,102 @@
-# ibs-cbs-copilot
+# IBS/CBS Copilot
+
+![Architecture diagram](docs/architecture.jpeg)
+
+> Open-source RAG for questions on Brazil's Tax Reform (IBS/CBS), grounded in
+> LC 214/2025, EC 132/2023, and Decree 12,955/2026.
+
+**Status:** in development. Day 2/10.
+
+## What it does
+
+Answers Portuguese questions about the Tax Reform, citing exact articles.
+
+## Stack
+
+- FastAPI + Pydantic
+- PostgreSQL + pgvector
+- Claude Sonnet 4.6
+- Ragas + MLflow (evaluation)
+- Langfuse (observability)
+- GitHub Actions (CI/CD with eval gates)
+- Fly.io (deploy)
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for technical decisions.
+
+## Local setup
+
+```bash
+# 1. Download source PDFs
+# See docs/download-sources.md
+
+# 2. Start infra
+docker compose up -d
+
+# 3. Apply schema
+docker compose exec -T postgres psql -U copilot -d copilot < migrations/001_init.sql
+
+# 4. Install
+poetry install
+
+# 5. Configure
+cp .env.example .env  # fill in OPENAI_API_KEY, ANTHROPIC_API_KEY
+
+# 6. Process + ingest
+poetry run python -m src.copilot.ingestion.pdf_to_text \
+    --input data/raw/lc_214_2025.pdf --output data/processed/lc214.txt
+
+poetry run python -m src.copilot.ingestion.ingest \
+    --input data/processed/lc214.txt --source "LC 214/2025"
+
+# Repeat for EC 132 and Decree 12,955
+```
+
+## Project structure
+
+## Downloading the source documents
+
+The copilot ingests 4 official documents. They're not committed to the repo (too large, and it's cleaner to fetch fresh copies). Follow the steps below and save everything under data/raw/.
+
+### 1. Complementary Law 214/2025
+
+The main law establishing IBS, CBS, and IS.
+
+Open https://www.planalto.gov.br/ccivil_03/leis/lcp/lcp214.htm
+If you see a "Texto compilado" link at the top, click it — that's the version with all amendments applied.
+Press Ctrl + P → Destination: Save as PDF → Portrait, default margins.
+Save as data/raw/lc_214_2025.pdf.
+
+### 2. Constitutional Amendment 132/2023
+
+The constitutional foundation of the Tax Reform.
+
+Open https://www.planalto.gov.br/ccivil_03/constituicao/emendas/emc/emc132.htm
+Same routine: Ctrl + P → Save as PDF.
+Save as data/raw/ec_132_2023.pdf.
+
+### 3. Decree 12,955/2026
+
+The executive regulation of the CBS.
+
+From the LC 214 page (step 1 above), click the link labeled (Vide Decreto nº 12.955, de 2026) at the top.
+If that link isn't there, Google site:planalto.gov.br decreto 12955 2026.
+Ctrl + P → Save as PDF.
+Save as data/raw/decreto_12955_2026.pdf.
+
+### 4. Technical Note NT 2025.002 v.1.50 (optional, v2 scope)
+
+Open https://www.nfe.fazenda.gov.br/portal/listaConteudo.aspx?tipoConteudo=04BIfIQt1aY=
+Under "Documentos vigentes", find NT 2025.002 with the highest version number (currently v.1.50).
+Click it. Download the PDF directly (no Save-as-PDF needed).
+Save as data/raw/nt_2025_002_v150.pdf.
+Verification
+
+After downloading, scroll to the end of each PDF to confirm the full text was captured (browsers sometimes truncate very long pages during print).
+
+Expected sizes, roughly:
+
+lc_214_2025.pdf — 3–5 MB
+ec_132_2023.pdf — 500 KB
+decreto_12955_2026.pdf — 1–2 MB
+
+If any file is significantly smaller, re-download.
