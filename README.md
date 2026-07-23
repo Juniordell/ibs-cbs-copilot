@@ -5,7 +5,7 @@
 > Open-source RAG for questions on Brazil's Tax Reform (IBS/CBS), grounded in
 > LC 214/2025, EC 132/2023, and Decree 12,955/2026.
 
-**Status:** in development. Day 2/10.
+**Status:** in development. Day 3/10.
 
 ## What it does
 
@@ -51,7 +51,24 @@ poetry run python -m src.copilot.ingestion.ingest \
 # Repeat for EC 132 and Decree 12,955
 ```
 
+## Try the retrievers
+
+Manual smoke test comparing vector, BM25, and hybrid on 10 queries:
+
+```bash
+poetry run python scripts/compare_retrievers.py
+```
+
+Or open `notebooks/03_retrieval_eyeball.ipynb` for the interactive version.
+
 ## Project structure
+
+src/copilot/
+├── ingestion/ # PDF → chunks → embeddings → Postgres
+├── retrieval/ # hybrid vector + BM25 with RRF
+├── generation/ # Claude prompt + response (day 4)
+├── api/ # FastAPI service (day 5)
+└── observability/ # Langfuse tracing (day 7)
 
 ## Downloading the source documents
 
