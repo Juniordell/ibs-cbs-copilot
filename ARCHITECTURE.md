@@ -60,6 +60,29 @@ Three retrievers, sharing a common `RetrievedChunk` type:
   top `k`. RRF depends only on rank position, not on the retrievers' native
   scores — so vector's [0,1] cosine and BM25's unbounded `ts_rank` combine cleanly.
 
+### Generation (`generation/`)
+
+- **Model:** Claude Sonnet 4.6 via Anthropic SDK (async).
+- **Prompts** (`prompts.py`, versioned): system prompt enforces 4 rules —
+  strict grounding, mandatory citation, explicit refusal, JSON output.
+  New prompt versions become new files (`prompts_v2.py`) so MLflow can compare.
+- **Schema** (`schemas.py`): Pydantic `Answer` with `Citation` list.
+  Quote capped at 500 chars — prevents the LLM from pasting whole articles.
+  `confidence` restricted to `high | medium | low` via `Literal`.
+- **Retry:** 2 attempts on `JSONDecodeError` or Pydantic `ValidationError`.
+  Network/rate-limit errors bubble up (different handling needed).
+- **Markdown-fence stripping:** the model occasionally wraps JSON in ` ```json `.
+  Cleaned before parsing.
+
+### Pipeline (`pipeline.py`)
+
+`answer_question(question, k=5) -> PipelineResult`
+
+- Retriever and Generator instantiated once (`@lru_cache`) — cheap reuse across
+  requests.
+- Returns both the `Answer` and the retrieved `chunks` — Day 6 (Ragas)
+  needs the chunks for faithfulness scoring.
+
 ### Why hybrid
 
 Legal Portuguese mixes technical terms ("split payment", "IBS", "Art. 31")
@@ -78,10 +101,11 @@ Rule: don't add complexity before measuring. Day 6 tells us what to fix.
 
 ## Key decisions
 
-| Decision   | Chosen                     | Alternative                           | Why                                                                       |
-| ---------- | -------------------------- | ------------------------------------- | ------------------------------------------------------------------------- |
-| Vector DB  | pgvector                   | Pinecone, Weaviate                    | Same Postgres, no extra service                                           |
-| Embeddings | text-embedding-3-small     | text-embedding-3-large                | 5x cheaper, sufficient for legal-domain retrieval                         |
-| Chunk unit | Legal article              | Fixed 500-char                        | Preserves citation structure                                              |
-| Migrations | Raw SQL                    | Alembic                               | No schema changes yet — overkill                                          |
-| Retrieval  | Hybrid vector + BM25 + RRF | Vector only, BM25 only, cross-encoder | Covers both semantic and keyword queries; RRF avoids score-scaling issues |
+| Decision         | Chosen                     | Alternative                           | Why                                                                       |
+| ---------------- | -------------------------- | ------------------------------------- | ------------------------------------------------------------------------- |
+| Vector DB        | pgvector                   | Pinecone, Weaviate                    | Same Postgres, no extra service                                           |
+| Embeddings       | text-embedding-3-small     | text-embedding-3-large                | 5x cheaper, sufficient for legal-domain retrieval                         |
+| Chunk unit       | Legal article              | Fixed 500-char                        | Preserves citation structure                                              |
+| Migrations       | Raw SQL                    | Alembic                               | No schema changes yet — overkill                                          |
+| Retrieval        | Hybrid vector + BM25 + RRF | Vector only, BM25 only, cross-encoder | Covers both semantic and keyword queries; RRF avoids score-scaling issues |
+| Generation model | Claude Sonnet 4.6          | GPT-4o, Gemini 2.5                    | Best JSON adherence + instruction following in tests                      |

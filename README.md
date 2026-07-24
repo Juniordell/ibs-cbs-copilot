@@ -5,7 +5,7 @@
 > Open-source RAG for questions on Brazil's Tax Reform (IBS/CBS), grounded in
 > LC 214/2025, EC 132/2023, and Decree 12,955/2026.
 
-**Status:** in development. Day 3/10.
+**Status:** in development. Day 4/10.
 
 ## What it does
 
@@ -60,6 +60,14 @@ poetry run python scripts/compare_retrievers.py
 ```
 
 Or open `notebooks/03_retrieval_eyeball.ipynb` for the interactive version.
+
+## Try the full pipeline
+
+End-to-end question answering (retrieve → generate → cite):
+
+```bash
+poetry run python scripts/try_pipeline.py
+```
 
 ## Project structure
 
