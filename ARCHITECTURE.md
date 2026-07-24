@@ -83,6 +83,41 @@ Three retrievers, sharing a common `RetrievedChunk` type:
 - Returns both the `Answer` and the retrieved `chunks` — Day 6 (Ragas)
   needs the chunks for faithfulness scoring.
 
+### API (`api/`)
+
+- **Framework:** FastAPI with async routes throughout.
+- **Lifespan:** `AppState` opens Postgres pool, Redis connection, and builds
+  the Generator on startup. Closed on shutdown. Single source of truth for
+  shared resources.
+- **Endpoints:**
+  - `GET /v1/health` — liveness for load balancers.
+  - `GET /v1/sources` — explicit list of indexed documents. Transparency:
+    users can verify what the copilot is grounded in.
+  - `POST /v1/ask` — full pipeline. Cached, rate-limited.
+- **Cache** (`cache.py`): Redis, 1h TTL, key = `sha256(top_k:normalized_question)`.
+  Same question with different `top_k` cached separately. Corrupt entries treated
+  as misses. Cost impact: ~100x reduction on repeated questions.
+- **Rate limit:** slowapi, 10 req/min per IP on `/ask` only. Health/sources unlimited.
+  Currently keyed by socket IP — day 9 will switch to `X-Forwarded-For` behind Fly.io.
+- **Validation:** Pydantic on request (`min_length=5`, `max_length=500` on
+  question). FastAPI returns 422 on schema violations before the handler runs.
+
+### Container (`Dockerfile`)
+
+Multi-stage build:
+
+1. **`deps` stage** — installs Poetry + all Python packages. Fat image, not shipped.
+2. **`runtime` stage** — copies only the installed packages and `src/`. Slim (~250MB).
+
+The `libpq5` system package is required at runtime for `psycopg` to connect to
+Postgres — without it the container can't talk to the DB.
+
+### Local system
+
+`docker-compose.yml` starts three services: `postgres` (pgvector/pg16), `redis`,
+and `api`. Postgres and Redis have healthchecks; `api` waits for `service_healthy`
+before starting. `.env` values propagate through the `environment:` block.
+
 ### Why hybrid
 
 Legal Portuguese mixes technical terms ("split payment", "IBS", "Art. 31")
@@ -109,3 +144,6 @@ Rule: don't add complexity before measuring. Day 6 tells us what to fix.
 | Migrations       | Raw SQL                    | Alembic                               | No schema changes yet — overkill                                          |
 | Retrieval        | Hybrid vector + BM25 + RRF | Vector only, BM25 only, cross-encoder | Covers both semantic and keyword queries; RRF avoids score-scaling issues |
 | Generation model | Claude Sonnet 4.6          | GPT-4o, Gemini 2.5                    | Best JSON adherence + instruction following in tests                      |
+| API framework    | FastAPI                    | Flask, Litestar                       | Async native, Pydantic native, Swagger free                               |
+| Cache backend    | Redis                      | In-process dict, Postgres             | Fast, TTL native, external for horizontal scaling later                   |
+| Rate limiter     | slowapi                    | fastapi-limiter, custom               | Simple, works with slowapi decorator, in-memory OK for v1                 |

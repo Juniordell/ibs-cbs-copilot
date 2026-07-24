@@ -5,7 +5,7 @@
 > Open-source RAG for questions on Brazil's Tax Reform (IBS/CBS), grounded in
 > LC 214/2025, EC 132/2023, and Decree 12,955/2026.
 
-**Status:** in development. Day 4/10.
+**Status:** in development. Day 5/10.
 
 ## What it does
 
@@ -69,13 +69,39 @@ End-to-end question answering (retrieve → generate → cite):
 poetry run python scripts/try_pipeline.py
 ```
 
+## Run the API
+
+Full system in Docker (API + Postgres + Redis):
+
+```bash
+docker compose up --build
+```
+
+Then:
+
+```bash
+curl -X POST http://localhost:8000/v1/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Qual a alíquota do IBS?"}'
+```
+
+Interactive docs at http://localhost:8000/docs.
+
+### Endpoints
+
+| Method | Path          | Description                                  |
+| ------ | ------------- | -------------------------------------------- |
+| GET    | `/v1/health`  | Health check                                 |
+| GET    | `/v1/sources` | Indexed source documents                     |
+| POST   | `/v1/ask`     | Ask a question (rate-limited: 10/min per IP) |
+
 ## Project structure
 
 src/copilot/
 ├── ingestion/ # PDF → chunks → embeddings → Postgres
 ├── retrieval/ # hybrid vector + BM25 with RRF
-├── generation/ # Claude prompt + response (day 4)
-├── api/ # FastAPI service (day 5)
+├── generation/ # Claude prompt + structured citations
+├── api/ # FastAPI + Redis cache + rate limiting
 └── observability/ # Langfuse tracing (day 7)
 
 ## Downloading the source documents
