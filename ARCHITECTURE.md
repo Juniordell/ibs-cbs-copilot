@@ -134,16 +134,67 @@ by paraphrase; BM25 missed the subtler articles. Hybrid keeps both wins.
 
 Rule: don't add complexity before measuring. Day 6 tells us what to fix.
 
+## Evaluation (`evals/`)
+
+### Golden set (`golden/golden_v1.jsonl`)
+
+30 Portuguese questions covering rates, taxpayers, base, split payment, cashback,
+exports, imports, basic goods basket, special regimes, selective tax. Each row
+includes:
+
+- `expected_answer_contains`: anchor keywords the answer should mention
+- `expected_sources`: articles the citation should reference
+
+Difficulty split: ~10 easy, ~13 medium, ~7 tricky.
+
+The golden set is versioned. Changes to it become `golden_v2.jsonl` etc. —
+lets us compare across dataset versions in MLflow.
+
+### Ragas metrics (built-in)
+
+Four LLM-judged metrics on every run:
+
+- **Faithfulness** — is the answer grounded in retrieved chunks?
+- **Answer Relevance** — does the answer address the question asked?
+- **Context Precision** — are the retrieved chunks useful?
+- **Context Recall** — did the retriever find all needed info?
+
+### Citation accuracy (custom, `metrics/citation_accuracy.py`)
+
+Deterministic. Compares `Answer.citations[*].article` against
+`expected_sources`. Reports precision / recall / F1 per question, then averages.
+
+Why custom: Ragas doesn't know the copilot's citation contract. Also runs
+without any LLM calls — fast, free, safe to run on every commit.
+
+### MLflow tracking
+
+SQLite backend at `mlflow.db`. Each run logs:
+
+- **Params:** `top_k`, `prompt_version`, `golden_size`, `dataset`
+- **Metrics:** all 4 Ragas metrics + 3 citation metrics
+
+Runs are named (`v0-baseline`, `v0-topk-3`, `v0-topk-10`) so the UI comparison
+tells a story.
+
+### v0 baseline observations
+
+Ragas Faithfulness 0.79 with Recall 0.43 means the answers are grounded but
+the retriever misses relevant chunks. Retrieval is the bottleneck, not
+generation. First lever to try in v1: bump `top_k`, revisit chunker.
+
 ## Key decisions
 
-| Decision         | Chosen                     | Alternative                           | Why                                                                       |
-| ---------------- | -------------------------- | ------------------------------------- | ------------------------------------------------------------------------- |
-| Vector DB        | pgvector                   | Pinecone, Weaviate                    | Same Postgres, no extra service                                           |
-| Embeddings       | text-embedding-3-small     | text-embedding-3-large                | 5x cheaper, sufficient for legal-domain retrieval                         |
-| Chunk unit       | Legal article              | Fixed 500-char                        | Preserves citation structure                                              |
-| Migrations       | Raw SQL                    | Alembic                               | No schema changes yet — overkill                                          |
-| Retrieval        | Hybrid vector + BM25 + RRF | Vector only, BM25 only, cross-encoder | Covers both semantic and keyword queries; RRF avoids score-scaling issues |
-| Generation model | Claude Sonnet 4.6          | GPT-4o, Gemini 2.5                    | Best JSON adherence + instruction following in tests                      |
-| API framework    | FastAPI                    | Flask, Litestar                       | Async native, Pydantic native, Swagger free                               |
-| Cache backend    | Redis                      | In-process dict, Postgres             | Fast, TTL native, external for horizontal scaling later                   |
-| Rate limiter     | slowapi                    | fastapi-limiter, custom               | Simple, works with slowapi decorator, in-memory OK for v1                 |
+| Decision            | Chosen                     | Alternative                           | Why                                                                                    |
+| ------------------- | -------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------- |
+| Vector DB           | pgvector                   | Pinecone, Weaviate                    | Same Postgres, no extra service                                                        |
+| Embeddings          | text-embedding-3-small     | text-embedding-3-large                | 5x cheaper, sufficient for legal-domain retrieval                                      |
+| Chunk unit          | Legal article              | Fixed 500-char                        | Preserves citation structure                                                           |
+| Migrations          | Raw SQL                    | Alembic                               | No schema changes yet — overkill                                                       |
+| Retrieval           | Hybrid vector + BM25 + RRF | Vector only, BM25 only, cross-encoder | Covers both semantic and keyword queries; RRF avoids score-scaling issues              |
+| Generation model    | Claude Sonnet 4.6          | GPT-4o, Gemini 2.5                    | Best JSON adherence + instruction following in tests                                   |
+| API framework       | FastAPI                    | Flask, Litestar                       | Async native, Pydantic native, Swagger free                                            |
+| Cache backend       | Redis                      | In-process dict, Postgres             | Fast, TTL native, external for horizontal scaling later                                |
+| Rate limiter        | slowapi                    | fastapi-limiter, custom               | Simple, works with slowapi decorator, in-memory OK for v1                              |
+| Eval framework      | Ragas + custom             | DeepEval, promptfoo                   | Ragas covers the 4 core RAG metrics out of box; custom fills the citation-contract gap |
+| Experiment tracking | MLflow + SQLite            | W&B, Braintrust                       | Free, local, versioned; SQLite is the modern default (file store deprecated)           |

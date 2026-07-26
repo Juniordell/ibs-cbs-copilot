@@ -104,6 +104,39 @@ src/copilot/
 ├── api/ # FastAPI + Redis cache + rate limiting
 └── observability/ # Langfuse tracing (day 7)
 
+evals/
+├── golden/ # golden question sets (versioned)
+├── metrics/ # custom metrics (citation_accuracy)
+└── run_ragas.py # eval driver + MLflow tracking
+
+## Evaluation
+
+Baseline results on the 30-question golden set (`v0-baseline`, top_k=5):
+
+| Metric             | Score | Target |
+| ------------------ | ----- | ------ |
+| Faithfulness       | 0.790 | > 0.85 |
+| Answer Relevance   | 0.528 | > 0.80 |
+| Context Precision  | 0.523 | > 0.75 |
+| Context Recall     | 0.435 | > 0.75 |
+| Citation Precision | X.XX  | —      |
+| Citation Recall    | X.XX  | —      |
+| Citation F1        | X.XX  | —      |
+
+Fill in citation scores after re-run.
+
+Run evals:
+
+```bash
+poetry run python evals/run_ragas.py --run-name v0-baseline --top-k 5
+```
+
+Open MLflow UI:
+
+```bash
+poetry run mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000
+```
+
 ## Downloading the source documents
 
 The copilot ingests 4 official documents. They're not committed to the repo (too large, and it's cleaner to fetch fresh copies). Follow the steps below and save everything under data/raw/.

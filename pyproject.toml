@@ -3,7 +3,7 @@ name = "ibs-cbs-copilot"
 version = "0.1.0"
 description = ""
 authors = [
-    {name = "Nelson Dell",email = "juniordell123@gmail.com"}
+    {name = "Nelson Dell", email = "juniordell123@gmail.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
@@ -21,6 +21,21 @@ dependencies = [
     "redis (>=8.0.1,<9.0.0)",
     "slowapi (>=0.1.10,<0.2.0)"
 ]
+
+[dependency-groups]
+dev = [
+    "notebook (>=7.6.1,<8.0.0)",
+    "pytest-asyncio (>=1.4.0,<2.0.0)",
+    "httpx (>=0.28.1,<0.29.0)",
+    "ragas (>=0.4.3,<0.5.0)",
+    "datasets (>=5.0.0,<6.0.0)",
+    "mlflow (>=3.14.0,<4.0.0)",
+    "langchain-community (>=0.4.2,<0.5.0)"
+]
+
+[tool.poetry]
+package-mode = false
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 asyncio_mode = "auto"
@@ -28,10 +43,3 @@ asyncio_mode = "auto"
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
-
-[dependency-groups]
-dev = [
-    "notebook (>=7.6.1,<8.0.0)",
-    "pytest-asyncio (>=1.4.0,<2.0.0)",
-    "httpx (>=0.28.1,<0.29.0)"
-]
