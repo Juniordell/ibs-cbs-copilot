@@ -5,7 +5,7 @@
 > Open-source RAG for questions on Brazil's Tax Reform (IBS/CBS), grounded in
 > LC 214/2025, EC 132/2023, and Decree 12,955/2026.
 
-**Status:** in development. Day 5/10.
+**Status:** in development. Day 7/10.
 
 ## What it does
 
@@ -101,8 +101,8 @@ src/copilot/
 ├── ingestion/ # PDF → chunks → embeddings → Postgres
 ├── retrieval/ # hybrid vector + BM25 with RRF
 ├── generation/ # Claude prompt + structured citations
-├── api/ # FastAPI + Redis cache + rate limiting
-└── observability/ # Langfuse tracing (day 7)
+├── api/ # FastAPI + cache + rate limiting + prometheus metrics
+└── observability/ # Langfuse tracing + LLM-as-judge sampling
 
 evals/
 ├── golden/ # golden question sets (versioned)
@@ -135,6 +135,22 @@ Open MLflow UI:
 
 ```bash
 poetry run mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000
+```
+
+## Observability
+
+Two-layer monitoring stack:
+
+- **Langfuse** — LLM traces, tokens, cost. Hierarchical spans (`answer_question` → `retrieve` + `generate`).
+- **LLM-as-judge** — 10% of traffic sampled and scored on faithfulness (Haiku 4.5, cheap judge). Score posted back to the trace.
+- **Prometheus** — infra metrics via `/metrics`: request count by endpoint+status, error count, request latency histogram.
+
+Sign up at [Langfuse Cloud](https://cloud.langfuse.com) and set the keys in `.env`:
+
+Prometheus endpoint:
+
+```bash
+curl http://localhost:8000/metrics
 ```
 
 ## Downloading the source documents

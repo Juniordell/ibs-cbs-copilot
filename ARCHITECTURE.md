@@ -183,18 +183,64 @@ Ragas Faithfulness 0.79 with Recall 0.43 means the answers are grounded but
 the retriever misses relevant chunks. Retrieval is the bottleneck, not
 generation. First lever to try in v1: bump `top_k`, revisit chunker.
 
+## Observability (`observability/`)
+
+Two layers, different concerns:
+
+### LLM layer (Langfuse)
+
+Every `answer_question` call creates a hierarchical trace:
+
+The `@observe` decorator wraps the top-level function.
+Child spans are created explicitly via `start_as_current_observation`.
+Cost is computed automatically by Langfuse from model + token counts.
+
+Trace lifecycle: async request → trace opens → child spans → judge (optional) → flush. `langfuse.flush()` guarantees delivery even if the process shuts down right after the response.
+
+### LLM-as-judge sampling (`judge.py`)
+
+10% of requests trigger a background faithfulness check:
+
+- Judge model: **Haiku 4.5** (10x cheaper than Sonnet, sufficient for extractive checks — "does this claim appear in this context?")
+- Runs async via `asyncio.create_task` — zero latency added to the user response
+- Score `faithfulness_online` posted back to the parent trace with a one-sentence reason
+- Silent on failure — a judge crash never breaks the API
+
+Never use the same model as the generator for judging — it biases toward its own style.
+
+### Infra layer (Prometheus)
+
+`GET /metrics` exposes standard Prometheus counters:
+
+- `copilot_requests_total{endpoint, status}` — count by route + status
+- `copilot_errors_total{endpoint}` — 5xx + exceptions
+- `copilot_request_latency_seconds{endpoint}` — histogram with buckets 0.1, 0.5, 1, 2, 3, 5, 10s
+
+Middleware wraps every request. No sampling — infra metrics are cheap.
+
+Fly.io auto-scrapes this endpoint on Day 9. No Prometheus server to run.
+
+### Why two layers
+
+Langfuse tells you _why_ something went wrong (which retrieval fetched what, which prompt tokens, which citations).
+Prometheus tells you _what_ went wrong (which endpoint, when, how bad).
+When p99 latency spikes at 3 AM, you look at Prometheus. When one specific answer is bad, you look at Langfuse.
+
 ## Key decisions
 
-| Decision            | Chosen                     | Alternative                           | Why                                                                                    |
-| ------------------- | -------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------- |
-| Vector DB           | pgvector                   | Pinecone, Weaviate                    | Same Postgres, no extra service                                                        |
-| Embeddings          | text-embedding-3-small     | text-embedding-3-large                | 5x cheaper, sufficient for legal-domain retrieval                                      |
-| Chunk unit          | Legal article              | Fixed 500-char                        | Preserves citation structure                                                           |
-| Migrations          | Raw SQL                    | Alembic                               | No schema changes yet — overkill                                                       |
-| Retrieval           | Hybrid vector + BM25 + RRF | Vector only, BM25 only, cross-encoder | Covers both semantic and keyword queries; RRF avoids score-scaling issues              |
-| Generation model    | Claude Sonnet 4.6          | GPT-4o, Gemini 2.5                    | Best JSON adherence + instruction following in tests                                   |
-| API framework       | FastAPI                    | Flask, Litestar                       | Async native, Pydantic native, Swagger free                                            |
-| Cache backend       | Redis                      | In-process dict, Postgres             | Fast, TTL native, external for horizontal scaling later                                |
-| Rate limiter        | slowapi                    | fastapi-limiter, custom               | Simple, works with slowapi decorator, in-memory OK for v1                              |
-| Eval framework      | Ragas + custom             | DeepEval, promptfoo                   | Ragas covers the 4 core RAG metrics out of box; custom fills the citation-contract gap |
-| Experiment tracking | MLflow + SQLite            | W&B, Braintrust                       | Free, local, versioned; SQLite is the modern default (file store deprecated)           |
+| Decision            | Chosen                     | Alternative                                | Why                                                                                    |
+| ------------------- | -------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------- |
+| Vector DB           | pgvector                   | Pinecone, Weaviate                         | Same Postgres, no extra service                                                        |
+| Embeddings          | text-embedding-3-small     | text-embedding-3-large                     | 5x cheaper, sufficient for legal-domain retrieval                                      |
+| Chunk unit          | Legal article              | Fixed 500-char                             | Preserves citation structure                                                           |
+| Migrations          | Raw SQL                    | Alembic                                    | No schema changes yet — overkill                                                       |
+| Retrieval           | Hybrid vector + BM25 + RRF | Vector only, BM25 only, cross-encoder      | Covers both semantic and keyword queries; RRF avoids score-scaling issues              |
+| Generation model    | Claude Sonnet 4.6          | GPT-4o, Gemini 2.5                         | Best JSON adherence + instruction following in tests                                   |
+| API framework       | FastAPI                    | Flask, Litestar                            | Async native, Pydantic native, Swagger free                                            |
+| Cache backend       | Redis                      | In-process dict, Postgres                  | Fast, TTL native, external for horizontal scaling later                                |
+| Rate limiter        | slowapi                    | fastapi-limiter, custom                    | Simple, works with slowapi decorator, in-memory OK for v1                              |
+| Eval framework      | Ragas + custom             | DeepEval, promptfoo                        | Ragas covers the 4 core RAG metrics out of box; custom fills the citation-contract gap |
+| Experiment tracking | MLflow + SQLite            | W&B, Braintrust                            | Free, local, versioned; SQLite is the modern default (file store deprecated)           |
+| LLM observability   | Langfuse Cloud             | self-hosted Langfuse, Braintrust, Helicone | Cloud avoids ClickHouse/Redis stack; enough for portfolio scale                        |
+| Judge model         | Claude Haiku 4.5           | GPT-4o, Sonnet                             | Faithfulness is extractive; cheap works, and avoids bias vs generator                  |
+| Infra metrics       | Prometheus                 | Datadog, custom                            | Standard, free, Fly.io scrapes automatically                                           |

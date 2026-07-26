@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import logging
 import os
+import asyncio
+from anthropic import AsyncAnthropic
+from src.copilot.observability.judge import judge_faithfulness, should_sample
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -36,6 +39,9 @@ def _get_retriever() -> HybridRetriever:
 def _get_generator() -> Generator:
     return Generator(api_key=os.environ["ANTHROPIC_API_KEY"])
 
+@lru_cache(maxsize=1)
+def _get_judge_client() -> AsyncAnthropic:
+    return AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 @observe(name="answer_question")
 async def answer_question(question: str, k: int = 5) -> PipelineResult:
@@ -68,6 +74,19 @@ async def answer_question(question: str, k: int = 5) -> PipelineResult:
                 "output": generation.output_tokens,
             },
         )
+
+    # Sample 10% for online eval
+    if should_sample():
+        trace_id = langfuse.get_current_trace_id()
+        if trace_id:
+            asyncio.create_task(judge_faithfulness(
+                trace_id=trace_id,
+                question=question,
+                answer=generation.answer.answer,
+                contexts=[c.text for c in chunks],
+                langfuse=langfuse,
+                anthropic=_get_judge_client(),
+            ))
 
     langfuse.flush()
     return PipelineResult(generation=generation, chunks=chunks)
