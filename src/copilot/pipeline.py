@@ -1,18 +1,18 @@
 # src/copilot/pipeline.py
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
-import asyncio
-from anthropic import AsyncAnthropic
-from src.copilot.observability.judge import judge_faithfulness, should_sample
 from dataclasses import dataclass
 from functools import lru_cache
 
+from anthropic import AsyncAnthropic
 from langfuse import Langfuse, observe
 from openai import OpenAI
 
-from src.copilot.generation.generator import Generator, GenerationResult
+from src.copilot.generation.generator import GenerationResult, Generator
+from src.copilot.observability.judge import judge_faithfulness, should_sample
 from src.copilot.retrieval.hybrid import HybridRetriever
 from src.copilot.retrieval.types import RetrievedChunk
 

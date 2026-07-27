@@ -6,15 +6,16 @@ import logging
 import os
 import sys
 from pathlib import Path
-import tiktoken
 
-from psycopg.types.json import Jsonb
 import psycopg
+import tiktoken
+from dotenv import load_dotenv
 from openai import OpenAI
 from pgvector.psycopg import register_vector
+from psycopg.types.json import Jsonb
 
 from src.copilot.ingestion.chunker import LegalChunk, chunk_file
-from dotenv import load_dotenv
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)

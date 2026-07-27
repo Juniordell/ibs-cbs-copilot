@@ -10,8 +10,10 @@ from pydantic import ValidationError
 
 from src.copilot.generation.prompts import (
     SYSTEM_PROMPT,
-    VERSION as PROMPT_VERSION,
     build_user_message,
+)
+from src.copilot.generation.prompts import (
+    VERSION as PROMPT_VERSION,
 )
 from src.copilot.generation.schemas import Answer
 from src.copilot.retrieval.types import RetrievedChunk

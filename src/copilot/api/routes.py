@@ -8,10 +8,10 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from src.copilot.generation.schemas import Answer
-from src.copilot.pipeline import answer_question
 from src.copilot.api.cache import AnswerCache
 from src.copilot.api.limiter import limiter
+from src.copilot.generation.schemas import Answer
+from src.copilot.pipeline import answer_question
 
 logger = logging.getLogger(__name__)
 

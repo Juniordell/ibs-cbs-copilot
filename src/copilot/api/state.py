@@ -7,8 +7,8 @@ from openai import OpenAI
 from psycopg_pool import AsyncConnectionPool
 from redis.asyncio import Redis
 
-from src.copilot.generation.generator import Generator
 from src.copilot.api.cache import AnswerCache
+from src.copilot.generation.generator import Generator
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ class AppState:
         redis_url: str,
         openai_key: str,
         anthropic_key: str,
-    ) -> "AppState":
+    ) -> AppState:
         logger.info("Opening Postgres pool")
         db_pool = AsyncConnectionPool(db_url, min_size=1, max_size=10, open=False)
         await db_pool.open()

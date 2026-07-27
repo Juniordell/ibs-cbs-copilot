@@ -4,9 +4,9 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field, asdict
+from collections.abc import Iterator
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Iterator
 
 
 @dataclass

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Sequence
+from collections.abc import Sequence
 
 import psycopg
 
@@ -16,10 +16,9 @@ class BM25Retriever:
         self.lang = lang
 
     def retrieve(self, query: str, k: int = 10) -> Sequence[RetrievedChunk]:
-        with psycopg.connect(self.db_url) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
+        with psycopg.connect(self.db_url) as conn, conn.cursor() as cur:
+            cur.execute(
+                """
                     SELECT id, text, article, paragraph, source, metadata,
                            ts_rank(text_tsv, plainto_tsquery(%s, %s)) AS score
                     FROM chunks
@@ -27,9 +26,9 @@ class BM25Retriever:
                     ORDER BY score DESC
                     LIMIT %s
                     """,
-                    (self.lang, query, self.lang, query, k),
-                )
-                rows = cur.fetchall()
+                (self.lang, query, self.lang, query, k),
+            )
+            rows = cur.fetchall()
 
         return [
             RetrievedChunk(
