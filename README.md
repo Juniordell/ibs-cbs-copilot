@@ -1,11 +1,14 @@
 # IBS/CBS Copilot
 
+[![CI](https://github.com/Juniordell/ibs-cbs-copilot/actions/workflows/ci.yaml/badge.svg)](https://github.com/Juniordell/ibs-cbs-copilot/actions/workflows/ci.yaml)
+[![Eval Gate](https://github.com/Juniordell/ibs-cbs-copilot/actions/workflows/eval.yaml/badge.svg)](https://github.com/Juniordell/ibs-cbs-copilot/actions/workflows/eval.yaml)
+
 ![Architecture diagram](docs/architecture.jpeg)
 
 > Open-source RAG for questions on Brazil's Tax Reform (IBS/CBS), grounded in
 > LC 214/2025, EC 132/2023, and Decree 12,955/2026.
 
-**Status:** in development. Day 7/10.
+**Status:** in development. Day 8/10.
 
 ## What it does
 
@@ -152,6 +155,15 @@ Prometheus endpoint:
 ```bash
 curl http://localhost:8000/metrics
 ```
+
+## CI/CD
+
+Every push runs:
+
+- **CI** (`ci.yml`) — ruff lint + pytest (unit + integration with Postgres service)
+- **Eval Gate** (`eval.yml`) — on PRs touching `src/copilot/**` or `evals/**`, runs Ragas on the golden set. PR fails if `faithfulness < 0.75` or `answer_relevance < 0.48`. Metrics posted as a PR comment.
+
+Quality regression is now blocked at the merge point.
 
 ## Downloading the source documents
 

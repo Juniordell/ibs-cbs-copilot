@@ -226,6 +226,36 @@ Langfuse tells you _why_ something went wrong (which retrieval fetched what, whi
 Prometheus tells you _what_ went wrong (which endpoint, when, how bad).
 When p99 latency spikes at 3 AM, you look at Prometheus. When one specific answer is bad, you look at Langfuse.
 
+## CI/CD (`.github/workflows/`)
+
+### `ci.yml` — every push, every PR
+
+- **Services:** Postgres (pgvector/pg16) + Redis, both with healthchecks
+- **Steps:** Poetry install → apply migrations → ruff lint → pytest (unit + integration)
+- Secrets injected via GitHub repo secrets (Anthropic, OpenAI, Langfuse), never committed
+- Poetry venv cached by `poetry.lock` hash
+
+### `eval.yml` — PRs touching pipeline or evals
+
+- **Path filter:** only runs on `src/copilot/**`, `evals/**`, `migrations/**` — most PRs skip it entirely
+- **Concurrency:** force-push kills the previous run so old CI doesn't burn budget
+- **Timeout:** 20 minutes — protection against runaway loops
+- **Fixtures** (`evals/fixtures/chunks_seed.sql`): pre-baked SQL insert for chunks matching the golden set. Small file, no OpenAI cost in CI.
+- **Runs Ragas** on `golden_v1.jsonl` with `top_k=5`
+- **Gate** (`check_gate.py`): exit 1 if `faithfulness < 0.75` or `answer_relevance < 0.48`. Thresholds calibrated to v0 baseline − 0.05 — the gate protects against regression, not against imperfection. Raise as the system improves.
+- **PR comment:** GitHub Actions posts a markdown table with all Ragas + custom citation scores
+
+### Why this matters
+
+The eval gate is the single most valuable engineering artifact in this project.
+It makes quality regression physically impossible to merge. Every LLM system
+eventually degrades silently — a prompt tweak that improves 9 questions can
+quietly break the 10th. Without a gate, nobody notices for weeks. With a gate,
+the PR fails immediately with the exact metric that dropped.
+
+This is not common in AI codebases yet. It's what separates a "notebook shipped
+to prod" from an actual system.
+
 ## Key decisions
 
 | Decision            | Chosen                     | Alternative                                | Why                                                                                    |
@@ -244,3 +274,6 @@ When p99 latency spikes at 3 AM, you look at Prometheus. When one specific answe
 | LLM observability   | Langfuse Cloud             | self-hosted Langfuse, Braintrust, Helicone | Cloud avoids ClickHouse/Redis stack; enough for portfolio scale                        |
 | Judge model         | Claude Haiku 4.5           | GPT-4o, Sonnet                             | Faithfulness is extractive; cheap works, and avoids bias vs generator                  |
 | Infra metrics       | Prometheus                 | Datadog, custom                            | Standard, free, Fly.io scrapes automatically                                           |
+| CI                  | GitHub Actions             | GitLab CI, CircleCI                        | Free for public repos, native to GitHub                                                |
+| Lint                | ruff                       | flake8 + black + isort                     | 10x faster, all three combined                                                         |
+| Eval-in-CI          | Ragas + custom gate on PRs | manual review, ad-hoc scripts              | Blocks silent quality regression at the merge point                                    |
