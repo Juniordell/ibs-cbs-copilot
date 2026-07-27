@@ -1,0 +1,114 @@
+name: Eval Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/copilot/**"
+      - "evals/**"
+      - "migrations/**"
+
+# Cancel superseded runs to save $
+concurrency:
+  group: eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: copilot
+          POSTGRES_USER: copilot
+          POSTGRES_PASSWORD: copilot_dev
+        ports: [5432:5432]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports: [6379:6379]
+
+    env:
+      DATABASE_URL: postgresql://copilot:copilot_dev@localhost:5432/copilot
+      REDIS_URL: redis://localhost:6379/0
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pipx install poetry==2.0.1
+
+      - name: Cache Poetry venv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry
+          key: poetry-${{ hashFiles('poetry.lock') }}
+
+      - name: Install deps
+        run: poetry install --with dev
+
+      - name: Apply migrations
+        run: |
+          for f in migrations/*.sql; do
+            PGPASSWORD=copilot_dev psql -h localhost -U copilot -d copilot -f "$f"
+          done
+
+      - name: Cache eval fixtures (chunks)
+        uses: actions/cache@v4
+        id: chunks-cache
+        with:
+          path: eval-chunks.sql
+          key: chunks-${{ hashFiles('evals/golden/**') }}
+
+      - name: Restore chunks or skip
+        if: steps.chunks-cache.outputs.cache-hit == 'true'
+        run: |
+          PGPASSWORD=copilot_dev psql -h localhost -U copilot -d copilot -f eval-chunks.sql
+
+      - name: Run Ragas on golden set
+        run: |
+          poetry run python evals/run_ragas.py \
+            --dataset evals/golden/golden_v1.jsonl \
+            --run-name pr-${{ github.event.pull_request.number }} \
+            --top-k 5 \
+            --output eval_results.json
+
+      - name: Gate on thresholds
+        run: |
+          poetry run python evals/check_gate.py \
+            --results eval_results.json \
+            --min-faithfulness 0.75 \
+            --min-answer-relevance 0.48
+
+      - name: Comment on PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const results = JSON.parse(fs.readFileSync('eval_results.json', 'utf8'));
+            const rows = Object.entries(results)
+              .map(([k, v]) => `| ${k} | ${Number(v).toFixed(3)} |`)
+              .join('\n');
+            const body = `### Eval results\n\n| Metric | Score |\n|---|---|\n${rows}`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
