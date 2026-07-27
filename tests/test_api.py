@@ -13,7 +13,6 @@ from src.copilot.generation.schemas import Answer, Citation
 from src.copilot.pipeline import PipelineResult
 from src.copilot.retrieval.types import RetrievedChunk
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

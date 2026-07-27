@@ -1,6 +1,5 @@
 # tests/test_chunker.py
-from src.copilot.ingestion.chunker import chunk_legal_text, LegalChunk
-
+from src.copilot.ingestion.chunker import LegalChunk, chunk_legal_text
 
 SAMPLE = """
 Art. 1º Ficam instituídos o IBS e a CBS.
