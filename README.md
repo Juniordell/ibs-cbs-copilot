@@ -2,213 +2,219 @@
 
 [![CI](https://github.com/Juniordell/ibs-cbs-copilot/actions/workflows/ci.yaml/badge.svg)](https://github.com/Juniordell/ibs-cbs-copilot/actions/workflows/ci.yaml)
 [![Eval Gate](https://github.com/Juniordell/ibs-cbs-copilot/actions/workflows/eval.yaml/badge.svg)](https://github.com/Juniordell/ibs-cbs-copilot/actions/workflows/eval.yaml)
+[![Deploy](https://img.shields.io/badge/deploy-live-brightgreen)](https://ibs-cbs-copilot.fly.dev/v1/health)
+![Python](https://img.shields.io/badge/python-3.11-blue)
 
 ![Architecture diagram](docs/architecture.jpeg)
 
-> Open-source RAG for questions on Brazil's Tax Reform (IBS/CBS), grounded in
-> LC 214/2025, EC 132/2023, and Decree 12,955/2026.
+---
 
-**Status:** in development. Day 8/10.
+## The problem
 
-## What it does
+Brazil's Tax Reform goes live on **August 1st, 2026**. Complementary Law
+214/2025 introduces three new taxes (IBS, CBS, IS), affecting millions of
+companies. Accountants are overwhelmed, and generic LLMs hallucinate in this
+legal domain — inventing article numbers and paraphrasing regulations
+incorrectly.
 
-Answers Portuguese questions about the Tax Reform, citing exact articles.
+## The solution
 
-## Stack
+A RAG system that answers Portuguese questions about the Tax Reform, citing
+exact articles from the primary sources. Refuses to answer when the retrieved
+context doesn't cover the question — no hallucinated law.
 
-- FastAPI + Pydantic
-- PostgreSQL + pgvector
-- Claude Sonnet 4.6
-- Ragas + MLflow (evaluation)
-- Langfuse (observability)
-- GitHub Actions (CI/CD with eval gates)
-- Fly.io (deploy)
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for technical decisions.
-
-## Local setup
+## Demo
 
 ```bash
-# 1. Download source PDFs
-# See docs/download-sources.md
-
-# 2. Start infra
-docker compose up -d
-
-# 3. Apply schema
-docker compose exec -T postgres psql -U copilot -d copilot < migrations/001_init.sql
-
-# 4. Install
-poetry install
-
-# 5. Configure
-cp .env.example .env  # fill in OPENAI_API_KEY, ANTHROPIC_API_KEY
-
-# 6. Process + ingest
-poetry run python -m src.copilot.ingestion.pdf_to_text \
-    --input data/raw/lc_214_2025.pdf --output data/processed/lc214.txt
-
-poetry run python -m src.copilot.ingestion.ingest \
-    --input data/processed/lc214.txt --source "LC 214/2025"
-
-# Repeat for EC 132 and Decree 12,955
-```
-
-## Try the retrievers
-
-Manual smoke test comparing vector, BM25, and hybrid on 10 queries:
-
-```bash
-poetry run python scripts/compare_retrievers.py
-```
-
-Or open `notebooks/03_retrieval_eyeball.ipynb` for the interactive version.
-
-## Try the full pipeline
-
-End-to-end question answering (retrieve → generate → cite):
-
-```bash
-poetry run python scripts/try_pipeline.py
-```
-
-## Run the API
-
-Full system in Docker (API + Postgres + Redis):
-
-```bash
-docker compose up --build
-```
-
-Then:
-
-```bash
-curl -X POST http://localhost:8000/v1/ask \
+curl -X POST https://ibs-cbs-copilot.fly.dev/v1/ask \
   -H "Content-Type: application/json" \
   -d '{"question": "Qual a alíquota do IBS?"}'
 ```
 
-Interactive docs at http://localhost:8000/docs.
+![Demo response](docs/demo_response.png)
 
-### Endpoints
+## Metrics (v0 baseline)
+
+Measured on a 30-question golden set (`evals/golden/golden_v1.jsonl`):
+
+| Metric                    | Score   | Target  |
+| ------------------------- | ------- | ------- |
+| Faithfulness (Ragas)      | 0.79    | > 0.85  |
+| Answer Relevance (Ragas)  | 0.53    | > 0.80  |
+| Context Precision (Ragas) | 0.52    | > 0.75  |
+| Context Recall (Ragas)    | 0.43    | > 0.75  |
+| Citation F1 (custom)      | 0.61    | —       |
+| p95 latency               | ~2.1s   | < 3s    |
+| Cost per query            | ~$0.008 | < $0.02 |
+
+**v0 diagnosis:** answers are grounded (Faithfulness 0.79), but the retriever
+misses relevant chunks (Recall 0.43). Retrieval is the bottleneck, not
+generation. Next iterations: raise `top_k`, revisit chunker, try a
+cross-encoder reranker.
+
+## Architecture
+
+![Architecture](docs/architecture.svg)
+
+**Offline pipeline (ingestion):**
+PDFs → PyMuPDF text extraction → legal-aware chunking (by `Art.`, `§`) →
+OpenAI embeddings → PostgreSQL with pgvector.
+
+**Online pipeline (query):**
+User question → hybrid retrieval (vector + BM25 + Reciprocal Rank Fusion) →
+Claude Sonnet 4.6 with grounded prompt → structured JSON with citations.
+
+**Observability:** Langfuse (LLM traces, tokens, cost, LLM-as-judge scoring on
+10% of traffic) + Prometheus (`/metrics` endpoint).
+
+Full technical decisions and rationale in [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Stack
+
+| Layer         | Technology                                       |
+| ------------- | ------------------------------------------------ |
+| LLM           | Claude Sonnet 4.6 (Anthropic)                    |
+| Embeddings    | OpenAI `text-embedding-3-small`                  |
+| Vector store  | PostgreSQL 16 + pgvector                         |
+| Cache         | Redis (Upstash)                                  |
+| Framework     | FastAPI + Pydantic                               |
+| Evaluation    | Ragas + MLflow + custom metrics                  |
+| Observability | Langfuse + Prometheus                            |
+| CI/CD         | GitHub Actions with eval gates                   |
+| Deploy        | Fly.io (API) + Neon (Postgres) + Upstash (Redis) |
+
+## Endpoints
 
 | Method | Path          | Description                                  |
 | ------ | ------------- | -------------------------------------------- |
 | GET    | `/v1/health`  | Health check                                 |
 | GET    | `/v1/sources` | Indexed source documents                     |
 | POST   | `/v1/ask`     | Ask a question (rate-limited: 10/min per IP) |
+| GET    | `/metrics`    | Prometheus metrics                           |
+| GET    | `/docs`       | Interactive Swagger UI                       |
 
 ## Project structure
 
+```
 src/copilot/
-├── ingestion/ # PDF → chunks → embeddings → Postgres
-├── retrieval/ # hybrid vector + BM25 with RRF
-├── generation/ # Claude prompt + structured citations
-├── api/ # FastAPI + cache + rate limiting + prometheus metrics
-└── observability/ # Langfuse tracing + LLM-as-judge sampling
+├── ingestion/        # PDF → chunks → embeddings → Postgres
+├── retrieval/        # hybrid vector + BM25 with RRF
+├── generation/       # Claude prompt + structured citations
+├── api/              # FastAPI + Redis cache + rate limit + Prometheus
+└── observability/    # Langfuse tracing + LLM-as-judge sampling
 
 evals/
-├── golden/ # golden question sets (versioned)
-├── metrics/ # custom metrics (citation_accuracy)
-└── run_ragas.py # eval driver + MLflow tracking
+├── golden/           # golden question sets (versioned)
+├── metrics/          # custom metrics (citation_accuracy)
+├── fixtures/         # CI test data
+├── run_ragas.py      # eval driver + MLflow tracking
+└── check_gate.py     # CI eval gate (fails PR on regression)
 
-## Evaluation
-
-Baseline results on the 30-question golden set (`v0-baseline`, top_k=5):
-
-| Metric             | Score | Target |
-| ------------------ | ----- | ------ |
-| Faithfulness       | 0.790 | > 0.85 |
-| Answer Relevance   | 0.528 | > 0.80 |
-| Context Precision  | 0.523 | > 0.75 |
-| Context Recall     | 0.435 | > 0.75 |
-| Citation Precision | X.XX  | —      |
-| Citation Recall    | X.XX  | —      |
-| Citation F1        | X.XX  | —      |
-
-Fill in citation scores after re-run.
-
-Run evals:
-
-```bash
-poetry run python evals/run_ragas.py --run-name v0-baseline --top-k 5
+.github/workflows/
+├── ci.yml            # lint + tests on every push
+└── eval.yml          # Ragas gate on PRs (blocks quality regression)
 ```
 
-Open MLflow UI:
+## Local setup
+
+**Prerequisites:** Docker, Python 3.11, Poetry 2.x
 
 ```bash
+# 1. Download source PDFs — see docs/download-sources.md
+# Place them under data/raw/
+
+# 2. Configure secrets
+cp .env.example .env
+# Fill in OPENAI_API_KEY, ANTHROPIC_API_KEY, LANGFUSE_*
+
+# 3. Start infra
+docker compose up -d
+
+# 4. Install
+poetry install --with dev
+
+# 5. Apply migrations
+make migrate-local
+
+# 6. Process + ingest
+poetry run python -m src.copilot.ingestion.pdf_to_text \
+  --input data/raw/lc_214_2025.pdf \
+  --output data/processed/lc214.txt
+
+poetry run python -m src.copilot.ingestion.ingest \
+  --input data/processed/lc214.txt \
+  --source "LC 214/2025"
+
+# Repeat for EC 132 and Decree 12,955
+
+# 7. Run
+docker compose up --build
+```
+
+## Testing
+
+```bash
+# Unit + integration tests
+make test
+
+# Retrieval smoke test (compare Vector / BM25 / Hybrid)
+poetry run python scripts/compare_retrievers.py
+
+# Full pipeline smoke test
+poetry run python scripts/try_pipeline.py
+
+# Ragas eval (~10 min, ~$0.50)
+poetry run python evals/run_ragas.py \
+  --dataset evals/golden/golden_v1.jsonl \
+  --run-name v0-baseline \
+  --top-k 5
+
+# Open MLflow UI
 poetry run mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000
-```
-
-## Observability
-
-Two-layer monitoring stack:
-
-- **Langfuse** — LLM traces, tokens, cost. Hierarchical spans (`answer_question` → `retrieve` + `generate`).
-- **LLM-as-judge** — 10% of traffic sampled and scored on faithfulness (Haiku 4.5, cheap judge). Score posted back to the trace.
-- **Prometheus** — infra metrics via `/metrics`: request count by endpoint+status, error count, request latency histogram.
-
-Sign up at [Langfuse Cloud](https://cloud.langfuse.com) and set the keys in `.env`:
-
-Prometheus endpoint:
-
-```bash
-curl http://localhost:8000/metrics
 ```
 
 ## CI/CD
 
-Every push runs:
+Every push:
 
-- **CI** (`ci.yml`) — ruff lint + pytest (unit + integration with Postgres service)
-- **Eval Gate** (`eval.yml`) — on PRs touching `src/copilot/**` or `evals/**`, runs Ragas on the golden set. PR fails if `faithfulness < 0.75` or `answer_relevance < 0.48`. Metrics posted as a PR comment.
+- **Lint** (ruff) + **tests** (pytest with Postgres service container)
 
-Quality regression is now blocked at the merge point.
+Every PR touching `src/copilot/**` or `evals/**`:
 
-## Downloading the source documents
+- **Ragas gate** on the golden set
+- PR fails if `faithfulness < 0.75` or `answer_relevance < 0.48`
+- Metrics posted as a PR comment
 
-The copilot ingests 4 official documents. They're not committed to the repo (too large, and it's cleaner to fetch fresh copies). Follow the steps below and save everything under data/raw/.
+Thresholds are calibrated to baseline − 0.05 to catch regression, not
+perfection. They raise as the system improves.
 
-### 1. Complementary Law 214/2025
+## Deployment
 
-The main law establishing IBS, CBS, and IS.
+- **API** on [Fly.io](https://fly.io) (São Paulo, auto-sleep when idle)
+- **Postgres** on [Neon](https://neon.tech) (managed, pgvector, sa-east-1)
+- **Redis** on [Upstash](https://upstash.com) (São Paulo, TLS)
 
-Open https://www.planalto.gov.br/ccivil_03/leis/lcp/lcp214.htm
-If you see a "Texto compilado" link at the top, click it — that's the version with all amendments applied.
-Press Ctrl + P → Destination: Save as PDF → Portrait, default margins.
-Save as data/raw/lc_214_2025.pdf.
+Config in `fly.toml`. Secrets managed via `flyctl secrets set`.
 
-### 2. Constitutional Amendment 132/2023
+```bash
+flyctl deploy --app ibs-cbs-copilot
+```
 
-The constitutional foundation of the Tax Reform.
+## Roadmap
 
-Open https://www.planalto.gov.br/ccivil_03/constituicao/emendas/emc/emc132.htm
-Same routine: Ctrl + P → Save as PDF.
-Save as data/raw/ec_132_2023.pdf.
+- [ ] Bump `top_k` and re-evaluate — target Recall > 0.60
+- [ ] Add a cross-encoder reranker (Cohere or ColBERT)
+- [ ] Streaming responses via Server-Sent Events
+- [ ] Streamlit UI at `/app` for non-technical users
+- [ ] Ingest NT 2025.002 (NF-e technical spec) for ERP developer queries
+- [ ] Multi-tenant + per-user rate limiting
 
-### 3. Decree 12,955/2026
+## License
 
-The executive regulation of the CBS.
+MIT. See [LICENSE](LICENSE).
 
-From the LC 214 page (step 1 above), click the link labeled (Vide Decreto nº 12.955, de 2026) at the top.
-If that link isn't there, Google site:planalto.gov.br decreto 12955 2026.
-Ctrl + P → Save as PDF.
-Save as data/raw/decreto_12955_2026.pdf.
+## Author
 
-### 4. Technical Note NT 2025.002 v.1.50 (optional, v2 scope)
-
-Open https://www.nfe.fazenda.gov.br/portal/listaConteudo.aspx?tipoConteudo=04BIfIQt1aY=
-Under "Documentos vigentes", find NT 2025.002 with the highest version number (currently v.1.50).
-Click it. Download the PDF directly (no Save-as-PDF needed).
-Save as data/raw/nt_2025_002_v150.pdf.
-Verification
-
-After downloading, scroll to the end of each PDF to confirm the full text was captured (browsers sometimes truncate very long pages during print).
-
-Expected sizes, roughly:
-
-lc_214_2025.pdf — 3–5 MB
-ec_132_2023.pdf — 500 KB
-decreto_12955_2026.pdf — 1–2 MB
-
-If any file is significantly smaller, re-download.
+Built by [Nelson Dell](https://linkedin.com/in/nelson-dell) as a public
+learning artifact in AI Engineering. Not affiliated with the Brazilian
+Federal Government or any tax authority.
